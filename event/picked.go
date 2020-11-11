@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/model"
 )
 
@@ -14,13 +13,13 @@ type Picked struct {
 }
 
 func (f Picked) String() string {
-	id := f.OutboxRecord.ID
+	id := f.OutboxRecord.ID.Hex()
 	groupID := f.OutboxRecord.GroupID
 
 	return fmt.Sprintf("[%s:%s] Message with ID %s picked", PREFIX, groupID, id)
 }
 
-func (p Picked) GetPickerGroupID() uuid.UUID {
+func (p Picked) GetPickerGroupID() string {
 	return p.OutboxRecord.GroupID
 }
 

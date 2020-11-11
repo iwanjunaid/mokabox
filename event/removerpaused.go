@@ -3,12 +3,10 @@ package event
 import (
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type RemoverPaused struct {
-	PickerGroupID uuid.UUID
+	PickerGroupID string
 	Timestamp     time.Time
 }
 
@@ -16,7 +14,7 @@ func (r RemoverPaused) String() string {
 	return fmt.Sprintf("[%s:%s] Remover paused", PREFIX, r.PickerGroupID)
 }
 
-func (r RemoverPaused) GetPickerGroupID() uuid.UUID {
+func (r RemoverPaused) GetPickerGroupID() string {
 	return r.PickerGroupID
 }
 

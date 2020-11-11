@@ -3,13 +3,13 @@ package config
 import (
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/internal/interfaces/config"
 )
 
 type CommonOutboxConfig struct {
-	GroupID                         uuid.UUID
-	OutboxTableName                 string
+	GroupID                         string
+	DatabaseName                    string
+	OutboxCollectionName            string
 	PickerPollInterval              int
 	PickerMessageLimitPerPoll       int
 	ZombieInterval                  int
@@ -19,19 +19,20 @@ type CommonOutboxConfig struct {
 	RemoverMessageLimitPerPoll      int
 }
 
-func NewDefaultCommonOutboxConfig(groupID uuid.UUID) config.OutboxConfig {
-	return NewCommonOutboxConfig(groupID, "", 0, 0, 0, 0, 0, 0, 0)
+func NewDefaultCommonOutboxConfig(groupID string, databaseName string) config.OutboxConfig {
+	return NewCommonOutboxConfig(groupID, databaseName, "", 0, 0, 0, 0, 0, 0, 0)
 }
 
-func NewCommonOutboxConfig(groupID uuid.UUID, outboxTableName string,
+func NewCommonOutboxConfig(groupID string, databaseName string,
+	outboxCollectionName string,
 	pickerPollInterval int, pickerMessageLimitPerPoll int,
 	zombieInterval int, zombiePickerPollInterval int, zombiePickerMessageLimitPerPoll int,
 	removerPollInterval int, removerMessageLimitPerPoll int) config.OutboxConfig {
 
-	cOutboxTableName := "outbox"
+	cOutboxCollectionName := "outbox"
 
-	if trimmed := strings.TrimSpace(outboxTableName); len(trimmed) > 0 {
-		cOutboxTableName = trimmed
+	if trimmed := strings.TrimSpace(outboxCollectionName); len(trimmed) > 0 {
+		cOutboxCollectionName = trimmed
 	}
 
 	cPickerPollInterval := 3
@@ -40,7 +41,7 @@ func NewCommonOutboxConfig(groupID uuid.UUID, outboxTableName string,
 		cPickerPollInterval = pickerPollInterval
 	}
 
-	cPickerMessageLimitPerPoll := 5
+	cPickerMessageLimitPerPoll := 100
 
 	if pickerMessageLimitPerPoll >= 1 {
 		cPickerMessageLimitPerPoll = pickerMessageLimitPerPoll
@@ -78,7 +79,8 @@ func NewCommonOutboxConfig(groupID uuid.UUID, outboxTableName string,
 
 	config := &CommonOutboxConfig{
 		groupID,
-		cOutboxTableName,
+		databaseName,
+		cOutboxCollectionName,
 		cPickerPollInterval,
 		cPickerMessageLimitPerPoll,
 		cZombieInterval,
@@ -91,12 +93,16 @@ func NewCommonOutboxConfig(groupID uuid.UUID, outboxTableName string,
 	return config
 }
 
-func (c *CommonOutboxConfig) GetGroupID() uuid.UUID {
+func (c *CommonOutboxConfig) GetGroupID() string {
 	return c.GroupID
 }
 
-func (c *CommonOutboxConfig) GetOutboxTableName() string {
-	return c.OutboxTableName
+func (c *CommonOutboxConfig) GetDatabaseName() string {
+	return c.DatabaseName
+}
+
+func (c *CommonOutboxConfig) GetOutboxCollectionName() string {
+	return c.OutboxCollectionName
 }
 
 func (c *CommonOutboxConfig) GetPickerPollInterval() int {

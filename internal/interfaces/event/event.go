@@ -3,12 +3,10 @@ package event
 import (
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type Event interface {
 	fmt.Stringer
-	GetPickerGroupID() uuid.UUID
+	GetPickerGroupID() string
 	GetTimestamp() time.Time
 }

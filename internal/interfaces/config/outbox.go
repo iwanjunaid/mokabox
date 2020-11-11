@@ -1,10 +1,9 @@
 package config
 
-import "github.com/google/uuid"
-
 type OutboxConfig interface {
-	GetGroupID() uuid.UUID
-	GetOutboxTableName() string
+	GetGroupID() string
+	GetDatabaseName() string
+	GetOutboxCollectionName() string
 	GetPickerPollInterval() int
 	GetPickerMessageLimitPerPoll() int
 	GetZombieInterval() int

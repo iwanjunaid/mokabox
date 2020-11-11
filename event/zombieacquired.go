@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/model"
 )
 
 type ZombieAcquired struct {
-	PickerGroupID uuid.UUID
-	OriginGroupID uuid.UUID
+	PickerGroupID string
+	OriginGroupID string
 	OutboxRecord  *model.OutboxRecord
 	Timestamp     time.Time
 }
@@ -21,14 +20,14 @@ func (z ZombieAcquired) String() string {
 	groupID := z.OutboxRecord.GroupID
 
 	return fmt.Sprintf("[%s:%s] Zombie message with ID %s from Origin Group ID %s is successfully acquired",
-		PREFIX, groupID, id, originGroupID)
+		PREFIX, groupID, id.Hex(), originGroupID)
 }
 
-func (z ZombieAcquired) GetPickerGroupID() uuid.UUID {
+func (z ZombieAcquired) GetPickerGroupID() string {
 	return z.PickerGroupID
 }
 
-func (z ZombieAcquired) GetOriginGroupID() uuid.UUID {
+func (z ZombieAcquired) GetOriginGroupID() string {
 	return z.OriginGroupID
 }
 

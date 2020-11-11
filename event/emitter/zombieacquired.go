@@ -5,12 +5,11 @@ import (
 
 	"github.com/iwanjunaid/mokabox/model"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/event"
 )
 
 func EmitEventZombieAcquired(e event.EventHandler, timestamp time.Time,
-	pickerGroupID uuid.UUID, originGroupID uuid.UUID,
+	pickerGroupID string, originGroupID string,
 	record *model.OutboxRecord) {
 	if e != nil {
 		eventZombieAcquired := event.ZombieAcquired{

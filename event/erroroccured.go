@@ -3,12 +3,10 @@ package event
 import (
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type ErrorOccured struct {
-	PickerGroupID uuid.UUID
+	PickerGroupID string
 	Error         error
 	Timestamp     time.Time
 }
@@ -17,7 +15,7 @@ func (e ErrorOccured) String() string {
 	return fmt.Sprintf("[%s:%s] Error occured: %s", PREFIX, e.PickerGroupID, e.Error.Error())
 }
 
-func (e ErrorOccured) GetPickerGroupID() uuid.UUID {
+func (e ErrorOccured) GetPickerGroupID() string {
 	return e.PickerGroupID
 }
 

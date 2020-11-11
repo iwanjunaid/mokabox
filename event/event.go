@@ -4,6 +4,6 @@ import (
 	"github.com/iwanjunaid/mokabox/internal/interfaces/event"
 )
 
-const PREFIX = "pokabox"
+const PREFIX = "mokabox"
 
 type EventHandler func(event.Event)

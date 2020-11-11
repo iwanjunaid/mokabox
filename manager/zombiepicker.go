@@ -1,134 +1,107 @@
 package manager
 
 import (
-	"database/sql"
-	"fmt"
+	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/event/emitter"
 	"github.com/iwanjunaid/mokabox/model"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func backgroundZombiePick(manager *CommonManager) {
-	defer manager.wg.Done()
-
 	outboxConfig := manager.GetOutboxConfig()
+	eventHandler := manager.GetEventHandler()
 	outboxGroupID := outboxConfig.GetGroupID()
+
+	defer manager.wg.Done()
+	defer func() {
+		r := recover()
+
+		if err, ok := r.(error); ok {
+			emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
+			manager.wg.Add(1)
+			time.Sleep(3 * time.Second)
+
+			go backgroundPick(manager)
+		}
+	}()
+
 	pollInterval := outboxConfig.GetZombiePickerPollInterval()
 	messageLimit := outboxConfig.GetZombiePickerMessageLimitPerPoll()
 	zombieInterval := outboxConfig.GetZombieInterval()
-	tableName := outboxConfig.GetOutboxTableName()
-	eventHandler := manager.GetEventHandler()
-
-	q := `
-	SELECT id, group_id, kafka_topic,
-	kafka_key, kafka_value,
-	priority, status, version,
-	created_at, sent_at
-	FROM %s
-	WHERE status = 'NEW'
-		AND group_id NOT IN ('%s')
-		AND NOW() - created_at > '%d second'::interval
-	ORDER BY priority, created_at
-	LIMIT %d
-	`
-
-	query := fmt.Sprintf(q, tableName, outboxGroupID, zombieInterval, messageLimit)
+	dbName := outboxConfig.GetDatabaseName()
+	collectionName := outboxConfig.GetOutboxCollectionName()
+	collection := manager.GetMongoClient().Database(dbName).Collection(collectionName)
+	defaultContext := context.TODO()
 
 	for {
 		// Emit event ZombiePickerStarted
 		emitter.EmitEventZombiePickerStarted(eventHandler, time.Now(), outboxGroupID)
 
 		recordsFound := false
-		rows, err := manager.GetDB().Query(query)
+		findOptions := options.Find()
+		findOptions.SetLimit(int64(messageLimit))
+		timeAgo := time.Now().Add(time.Duration(-zombieInterval) * time.Second)
+
+		cur, err := collection.Find(defaultContext, bson.M{
+			"group_id": bson.M{
+				"$ne": outboxGroupID,
+			},
+			"created_at": bson.M{
+				"$lt": timeAgo,
+			},
+		}, findOptions)
 
 		if err != nil {
-			emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
 			panic(err)
 		}
 
-		for rows.Next() {
+		for cur.Next(defaultContext) {
 			recordsFound = true
 
-			var (
-				id         sql.NullString
-				groupID    sql.NullString
-				kafkaTopic sql.NullString
-				kafkaKey   sql.NullString
-				kafkaValue sql.NullString
-				priority   sql.NullInt32
-				status     sql.NullString
-				version    sql.NullInt32
-				createdAt  sql.NullTime
-				sentAt     sql.NullTime
-			)
+			var record model.OutboxRecord
 
-			err := rows.Scan(&id, &groupID, &kafkaTopic, &kafkaKey,
-				&kafkaValue, &priority, &status, &version,
-				&createdAt, &sentAt)
+			recErr := cur.Decode(&record)
 
-			if err != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
-				panic(err)
-			}
-
-			var record *model.OutboxRecord
-
-			record = &model.OutboxRecord{
-				ID:         uuid.MustParse(id.String),
-				GroupID:    uuid.MustParse(groupID.String),
-				KafkaTopic: kafkaTopic.String,
-				KafkaKey:   kafkaKey.String,
-				KafkaValue: kafkaValue.String,
-				Priority:   uint(priority.Int32),
-				Status:     status.String,
-				Version:    uint(version.Int32),
-				CreatedAt:  createdAt.Time,
-				SentAt:     sentAt.Time,
+			if recErr != nil {
+				panic(recErr)
 			}
 
 			// Emit event ZombiePicked
 			emitter.EmitEventZombiePicked(eventHandler, time.Now(),
-				outboxGroupID, record)
+				outboxGroupID, &record)
 
-			q := `
-			UPDATE %s
-			SET group_id = '%s', version = %d
-			WHERE id = '%s' AND version = %d
-			`
-
-			newVersion := version.Int32 + 1
-			updateQuery := fmt.Sprintf(q, tableName, outboxGroupID, newVersion, id.String, version.Int32)
-			stmt, stmtErr := manager.GetDB().Prepare(updateQuery)
-
-			if stmtErr != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, stmtErr)
-				panic(stmtErr)
+			update := bson.D{
+				{Key: "$set", Value: bson.M{
+					"group_id": outboxGroupID,
+					"sent_at":  time.Now(),
+				}},
+				{Key: "$inc", Value: bson.M{"version": 1}},
 			}
 
-			result, execErr := stmt.Exec()
+			result, err := collection.UpdateOne(defaultContext, bson.M{
+				"_id":     record.ID,
+				"version": record.Version,
+			}, update)
 
-			if execErr != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, execErr)
-				panic(execErr)
+			if err != nil {
+				panic(err)
 			}
 
-			rowsAffected, affectedErr := result.RowsAffected()
-
-			if affectedErr != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, affectedErr)
-				panic(affectedErr)
-			}
-
-			// Emit event ZombieAcquired
-			if rowsAffected > 0 {
+			if result.ModifiedCount > 0 {
+				// Emit event ZombieAcquired
 				emitter.EmitEventZombieAcquired(eventHandler, time.Now(),
-					outboxGroupID, record.GroupID, record)
+					outboxGroupID, record.GroupID, &record)
 			}
 		}
 
-		rows.Close()
+		curErr := cur.Close(defaultContext)
+
+		if curErr != nil {
+			panic(curErr)
+		}
 
 		if !recordsFound {
 			// Emit event ZombiePickerPaused

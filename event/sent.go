@@ -4,12 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/model"
 )
 
 type Sent struct {
-	PickerGroupID  uuid.UUID
+	PickerGroupID  string
 	KafkaTopic     string
 	KafkaPartition int32
 	OutboxRecord   *model.OutboxRecord
@@ -18,11 +17,11 @@ type Sent struct {
 
 func (s Sent) String() string {
 	return fmt.Sprintf("[%s:%s] Message with ID %s sent to kafka in topic %s and partition %d",
-		PREFIX, s.PickerGroupID, s.OutboxRecord.ID,
+		PREFIX, s.PickerGroupID, s.OutboxRecord.ID.Hex(),
 		s.KafkaTopic, s.KafkaPartition)
 }
 
-func (s Sent) GetPickerGroupID() uuid.UUID {
+func (s Sent) GetPickerGroupID() string {
 	return s.PickerGroupID
 }
 

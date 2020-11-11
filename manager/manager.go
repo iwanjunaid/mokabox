@@ -1,13 +1,13 @@
 package manager
 
 import (
-	"database/sql"
 	"sync"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/iwanjunaid/mokabox/event"
 	"github.com/iwanjunaid/mokabox/internal/interfaces/config"
 	"github.com/iwanjunaid/mokabox/internal/interfaces/manager"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type CommonManager struct {
@@ -15,11 +15,11 @@ type CommonManager struct {
 	kafkaConfig   config.KafkaConfig
 	kafkaProducer *kafka.Producer
 	eventHandler  event.EventHandler
-	db            *sql.DB
+	client        *mongo.Client
 	wg            *sync.WaitGroup
 }
 
-func New(outboxConfig config.OutboxConfig, kafkaConfig config.KafkaConfig, db *sql.DB) (manager.Manager, error) {
+func New(outboxConfig config.OutboxConfig, kafkaConfig config.KafkaConfig, client *mongo.Client) (manager.Manager, error) {
 	var wg sync.WaitGroup
 
 	kafkaProducer, err := kafka.NewProducer(kafkaConfig.GetConfigMap())
@@ -33,7 +33,7 @@ func New(outboxConfig config.OutboxConfig, kafkaConfig config.KafkaConfig, db *s
 		kafkaConfig:   kafkaConfig,
 		kafkaProducer: kafkaProducer,
 		eventHandler:  nil,
-		db:            db,
+		client:        client,
 		wg:            &wg,
 	}
 
@@ -60,8 +60,8 @@ func (m *CommonManager) GetEventHandler() event.EventHandler {
 	return m.eventHandler
 }
 
-func (m *CommonManager) GetDB() *sql.DB {
-	return m.db
+func (m *CommonManager) GetMongoClient() *mongo.Client {
+	return m.client
 }
 
 func (m *CommonManager) Start() error {

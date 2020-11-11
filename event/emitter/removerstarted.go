@@ -3,12 +3,11 @@ package emitter
 import (
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/event"
 )
 
 func EmitEventRemoverStarted(e event.EventHandler, timestamp time.Time,
-	pickerGroupID uuid.UUID) {
+	pickerGroupID string) {
 	if e != nil {
 		eventRemoverStarted := event.RemoverStarted{
 			PickerGroupID: pickerGroupID,

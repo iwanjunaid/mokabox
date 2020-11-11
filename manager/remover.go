@@ -1,115 +1,86 @@
 package manager
 
 import (
-	"database/sql"
-	"fmt"
+	"context"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/event/emitter"
 	"github.com/iwanjunaid/mokabox/model"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func backgroundRemove(manager *CommonManager) {
-	defer manager.wg.Done()
-
 	outboxConfig := manager.GetOutboxConfig()
+	eventHandler := manager.GetEventHandler()
 	outboxGroupID := outboxConfig.GetGroupID()
+
+	defer manager.wg.Done()
+	defer func() {
+		r := recover()
+
+		if err, ok := r.(error); ok {
+			emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
+			manager.wg.Add(1)
+			time.Sleep(3 * time.Second)
+
+			go backgroundRemove(manager)
+		}
+	}()
+
 	pollInterval := outboxConfig.GetRemoverPollInterval()
 	messageLimit := outboxConfig.GetRemoverMessageLimitPerPoll()
-	tableName := outboxConfig.GetOutboxTableName()
-	eventHandler := manager.GetEventHandler()
-
-	q := `
-	SELECT id, group_id, kafka_topic,
-		kafka_key, kafka_value,
-		priority, status, version,
-		created_at, sent_at
-	FROM %s
-	WHERE status = 'SENT'
-		AND group_id = '%s'
-	LIMIT %d
-	`
-
-	query := fmt.Sprintf(q, tableName, outboxGroupID, messageLimit)
+	dbName := outboxConfig.GetDatabaseName()
+	collectionName := outboxConfig.GetOutboxCollectionName()
+	collection := manager.GetMongoClient().Database(dbName).Collection(collectionName)
+	defaultContext := context.TODO()
 
 	for {
 		// Emit event RemoverStarted
 		emitter.EmitEventRemoverStarted(eventHandler, time.Now(), outboxGroupID)
 
 		recordsFound := false
-		rows, err := manager.GetDB().Query(query)
+		findOptions := options.Find()
+		findOptions.SetLimit(int64(messageLimit))
+
+		cur, err := collection.Find(defaultContext, bson.M{
+			"status": model.FlagSent,
+		}, findOptions)
 
 		if err != nil {
-			emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
 			panic(err)
 		}
 
-		for rows.Next() {
+		for cur.Next(defaultContext) {
 			recordsFound = true
 
-			var (
-				id         sql.NullString
-				groupID    sql.NullString
-				kafkaTopic sql.NullString
-				kafkaKey   sql.NullString
-				kafkaValue sql.NullString
-				priority   sql.NullInt32
-				status     sql.NullString
-				version    sql.NullInt32
-				createdAt  sql.NullTime
-				sentAt     sql.NullTime
-			)
+			var record model.OutboxRecord
 
-			err := rows.Scan(&id, &groupID, &kafkaTopic, &kafkaKey,
-				&kafkaValue, &priority, &status, &version,
-				&createdAt, &sentAt)
+			recErr := cur.Decode(&record)
+
+			if recErr != nil {
+				panic(recErr)
+			}
+
+			filter := bson.D{primitive.E{Key: "_id", Value: record.ID}}
+			result, err := collection.DeleteOne(defaultContext, filter)
 
 			if err != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
 				panic(err)
 			}
 
-			q := `
-			DELETE FROM %s
-			WHERE status = 'SENT' AND group_id = '%s'
-			`
-
-			deleteQuery := fmt.Sprintf(q, tableName, outboxGroupID)
-			stmt, stmtErr := manager.GetDB().Prepare(deleteQuery)
-
-			if stmtErr != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, stmtErr)
-				panic(stmtErr)
+			if result.DeletedCount > 0 {
+				// Emit event Removed
+				emitter.EmitEventRemoved(eventHandler, time.Now(), outboxGroupID, &record)
 			}
-
-			_, execErr := stmt.Exec()
-
-			if execErr != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, execErr)
-				panic(execErr)
-			}
-
-			var record *model.OutboxRecord
-
-			record = &model.OutboxRecord{
-				ID:         uuid.MustParse(id.String),
-				GroupID:    uuid.MustParse(groupID.String),
-				KafkaTopic: kafkaTopic.String,
-				KafkaKey:   kafkaKey.String,
-				KafkaValue: kafkaValue.String,
-				Priority:   uint(priority.Int32),
-				Status:     status.String,
-				Version:    uint(version.Int32),
-				CreatedAt:  createdAt.Time,
-				SentAt:     sentAt.Time,
-			}
-
-			// Emit event Removed
-			emitter.EmitEventRemoved(eventHandler, time.Now(), outboxGroupID, record)
 		}
 
-		rows.Close()
+		curErr := cur.Close(defaultContext)
+
+		if curErr != nil {
+			panic(curErr)
+		}
 
 		if !recordsFound {
 			// Emit event RemoverPaused

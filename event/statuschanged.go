@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/model"
 )
 
@@ -20,10 +19,10 @@ func (s StatusChanged) String() string {
 	groupID := s.OutboxRecord.GroupID
 
 	return fmt.Sprintf("[%s:%s] Status changed from %s to %s for message with ID %s",
-		PREFIX, groupID, s.From, s.To, id)
+		PREFIX, groupID, s.From, s.To, id.Hex())
 }
 
-func (s StatusChanged) GetPickerGroupID() uuid.UUID {
+func (s StatusChanged) GetPickerGroupID() string {
 	return s.OutboxRecord.GroupID
 }
 

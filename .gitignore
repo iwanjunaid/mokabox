@@ -3,3 +3,6 @@ mokabox
 
 # Go files
 main.go
+
+# Vim
+*.swp

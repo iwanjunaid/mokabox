@@ -4,22 +4,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/model"
 )
 
 type Removed struct {
-	PickerGroupID uuid.UUID
+	PickerGroupID string
 	OutboxRecord  *model.OutboxRecord
 	Timestamp     time.Time
 }
 
 func (r Removed) String() string {
 	return fmt.Sprintf("[%s:%s] Message with ID %s successfully removed",
-		PREFIX, r.PickerGroupID, r.OutboxRecord.ID)
+		PREFIX, r.PickerGroupID, r.OutboxRecord.ID.Hex())
 }
 
-func (r Removed) GetPickerGroupID() uuid.UUID {
+func (r Removed) GetPickerGroupID() string {
 	return r.PickerGroupID
 }
 

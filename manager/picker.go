@@ -1,24 +1,27 @@
 package manager
 
 import (
-	"database/sql"
-	"fmt"
+	"context"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/google/uuid"
 	"github.com/iwanjunaid/mokabox/event/emitter"
 	"github.com/iwanjunaid/mokabox/model"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func backgroundPick(manager *CommonManager) {
+	outboxConfig := manager.GetOutboxConfig()
+	eventHandler := manager.GetEventHandler()
+	outboxGroupID := outboxConfig.GetGroupID()
+
 	defer manager.wg.Done()
 	defer func() {
 		r := recover()
 
-		fmt.Println("Recover from panic")
-
-		if _, ok := r.(error); ok {
+		if err, ok := r.(error); ok {
+			emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
 			manager.wg.Add(1)
 			time.Sleep(3 * time.Second)
 
@@ -26,82 +29,46 @@ func backgroundPick(manager *CommonManager) {
 		}
 	}()
 
-	outboxConfig := manager.GetOutboxConfig()
-	outboxGroupID := outboxConfig.GetGroupID()
 	pollInterval := outboxConfig.GetPickerPollInterval()
 	messageLimit := outboxConfig.GetPickerMessageLimitPerPoll()
-	tableName := outboxConfig.GetOutboxTableName()
-	eventHandler := manager.GetEventHandler()
-
-	q := `
-	SELECT id, group_id, kafka_topic,
-		kafka_key, kafka_value,
-		priority, status, version,
-		created_at, sent_at
-	FROM %s
-	WHERE status = '%s'
-		AND group_id = '%s'
-	ORDER BY priority, created_at
-	LIMIT %d
-	`
-
-	query := fmt.Sprintf(q, tableName, model.FlagNew, outboxGroupID, messageLimit)
+	dbName := outboxConfig.GetDatabaseName()
+	collectionName := outboxConfig.GetOutboxCollectionName()
+	collection := manager.GetMongoClient().Database(dbName).Collection(collectionName)
+	defaultContext := context.TODO()
 
 	for {
 		// Emit event PickerStarted
 		emitter.EmitEventPickerStarted(eventHandler, time.Now(), outboxGroupID)
 
 		recordsFound := false
-		rows, err := manager.GetDB().Query(query)
+		findOptions := options.Find()
+		findOptions.SetLimit(int64(messageLimit))
+		findOptions.SetSort(bson.D{
+			{Key: "priority", Value: 1},
+			{Key: "created_at", Value: 1},
+		})
+
+		cur, err := collection.Find(defaultContext, bson.M{
+			"status": model.FlagNew,
+		}, findOptions)
 
 		if err != nil {
-			emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
 			panic(err)
 		}
 
-		for rows.Next() {
+		for cur.Next(defaultContext) {
 			recordsFound = true
 
-			var (
-				id         sql.NullString
-				groupID    sql.NullString
-				kafkaTopic sql.NullString
-				kafkaKey   sql.NullString
-				kafkaValue sql.NullString
-				priority   sql.NullInt32
-				status     sql.NullString
-				version    sql.NullInt32
-				createdAt  sql.NullTime
-				sentAt     sql.NullTime
-			)
+			var record model.OutboxRecord
 
-			err := rows.Scan(&id, &groupID, &kafkaTopic, &kafkaKey,
-				&kafkaValue, &priority, &status, &version,
-				&createdAt, &sentAt)
+			recErr := cur.Decode(&record)
 
-			if err != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, err)
-				panic(err)
+			if recErr != nil {
+				panic(recErr)
 			}
 
 			// Emit event Picked
-			var record *model.OutboxRecord
-
-			record = &model.OutboxRecord{
-				ID:         uuid.MustParse(id.String),
-				GroupID:    uuid.MustParse(groupID.String),
-				KafkaTopic: kafkaTopic.String,
-				KafkaKey:   kafkaKey.String,
-				KafkaValue: kafkaValue.String,
-				Priority:   uint(priority.Int32),
-				Status:     status.String,
-				Version:    uint(version.Int32),
-				CreatedAt:  createdAt.Time,
-				SentAt:     sentAt.Time,
-			}
-
-			// Emit event Picked
-			emitter.EmitEventPicked(eventHandler, time.Now(), record)
+			emitter.EmitEventPicked(eventHandler, time.Now(), &record)
 
 			// Send to kafka
 			deliveryChan := make(chan kafka.Event, 10000)
@@ -109,18 +76,19 @@ func backgroundPick(manager *CommonManager) {
 
 			var key []byte
 
-			if kafkaKey.String != "" {
-				key = []byte(kafkaKey.String)
+			if record.KafkaKey != "" {
+				key = []byte(record.KafkaKey)
 			}
 
 			errProduce := kafkaProducer.Produce(&kafka.Message{
-				TopicPartition: kafka.TopicPartition{Topic: &kafkaTopic.String, Partition: kafka.PartitionAny},
-				Value:          []byte(kafkaValue.String),
-				Key:            key,
+				TopicPartition: kafka.TopicPartition{
+					Topic:     &record.KafkaTopic,
+					Partition: kafka.PartitionAny},
+				Value: []byte(record.KafkaValue),
+				Key:   key,
 			}, deliveryChan)
 
 			if errProduce != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(), outboxGroupID, errProduce)
 				panic(errProduce)
 			}
 
@@ -128,8 +96,6 @@ func backgroundPick(manager *CommonManager) {
 			kafkaMessage := kafkaEvent.(*kafka.Message)
 
 			if parErr := kafkaMessage.TopicPartition.Error; parErr != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(),
-					outboxGroupID, parErr)
 				panic(parErr)
 			}
 
@@ -137,42 +103,34 @@ func backgroundPick(manager *CommonManager) {
 			emitter.EmitEventSent(eventHandler, time.Now(), outboxGroupID,
 				*kafkaMessage.TopicPartition.Topic,
 				kafkaMessage.TopicPartition.Partition,
-				record)
+				&record)
 
 			close(deliveryChan)
 
-			// Update status to 'SENT'
-			newSentAt := time.Now()
-			q := `
-			UPDATE %s
-			SET status = $1,
-				sent_at = $2
-			WHERE id = '%s'
-			`
-
-			sentQuery := fmt.Sprintf(q, tableName, id.String)
-			stmt, stmtErr := manager.GetDB().Prepare(sentQuery)
-
-			if stmtErr != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(),
-					outboxGroupID, stmtErr)
-				panic(stmtErr)
+			update := bson.D{
+				{Key: "$set", Value: bson.M{"status": "SENT"}},
 			}
 
-			_, execErr := stmt.Exec(model.FlagSent, newSentAt)
+			result, err := collection.UpdateOne(defaultContext, bson.M{
+				"_id": record.ID,
+			}, update)
 
-			if execErr != nil {
-				emitter.EmitEventErrorOccured(eventHandler, time.Now(),
-					outboxGroupID, execErr)
-				panic(execErr)
+			if err != nil {
+				panic(err)
 			}
 
-			// Emit event StatusChanged
-			emitter.EmitEventStatusChanged(eventHandler, time.Now(),
-				model.FlagNew, model.FlagSent, record)
+			if result.ModifiedCount > 0 {
+				// Emit event StatusChanged
+				emitter.EmitEventStatusChanged(eventHandler, time.Now(),
+					model.FlagNew, model.FlagSent, &record)
+			}
 		}
 
-		rows.Close()
+		curErr := cur.Close(defaultContext)
+
+		if curErr != nil {
+			panic(curErr)
+		}
 
 		if !recordsFound {
 			// Emit event PickerPaused
