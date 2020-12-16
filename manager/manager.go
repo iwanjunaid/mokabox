@@ -65,11 +65,11 @@ func (m *CommonManager) GetMongoClient() *mongo.Client {
 }
 
 func (m *CommonManager) Start() error {
-	m.wg.Add(3)
+	m.wg.Add(2)
 
 	go backgroundPick(m)
 	go backgroundZombiePick(m)
-	go backgroundRemove(m)
+	// go backgroundRemove(m)
 
 	return nil
 }
