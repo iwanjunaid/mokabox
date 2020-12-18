@@ -2,7 +2,7 @@ package config
 
 import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/iwanjunaid/mokabox/internal/interfaces/config"
+	"github.com/iwanjunaid/mokabox/pkg/interfaces/config"
 )
 
 type CommonKafkaConfig struct {

@@ -3,7 +3,7 @@ package manager
 import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/iwanjunaid/mokabox/event"
-	"github.com/iwanjunaid/mokabox/internal/interfaces/config"
+	"github.com/iwanjunaid/mokabox/pkg/interfaces/config"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
