@@ -3,7 +3,7 @@ package config
 import (
 	"strings"
 
-	"github.com/iwanjunaid/mokabox/internal/interfaces/config"
+	"github.com/iwanjunaid/mokabox/pkg/interfaces/config"
 )
 
 type CommonOutboxConfig struct {

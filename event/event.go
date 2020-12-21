@@ -1,7 +1,7 @@
 package event
 
 import (
-	"github.com/iwanjunaid/mokabox/internal/interfaces/event"
+	"github.com/iwanjunaid/mokabox/pkg/interfaces/event"
 )
 
 const PREFIX = "mokabox"
